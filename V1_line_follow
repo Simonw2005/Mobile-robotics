@@ -1,0 +1,86 @@
+//figures to adjust
+int speed = 50;
+int turnSpeed =10;
+ 
+//motor pins
+int motor1PWM = 37;
+int motor1Phase = 38;
+int motor2PWM = 39;
+int motor2Phase = 20;
+
+//line follow
+int AnalogValue[5] = {0,0,0,0,0};
+int DigitalValue[5]= {0,0,0,0,0};
+int AnalogPin[5] = {4,5,6,7,15}; // keep 8 free for tone O/P music
+
+int weights[5]= {-2,-1,0,1,2};
+
+int speedLeft = speed;
+int speedRight = speed;
+
+// the setup routine runs once when you press reset:
+void setup() {
+Serial.begin(9600);
+pinMode(motor1PWM, OUTPUT);
+pinMode(motor1Phase, OUTPUT);
+pinMode(motor2PWM, OUTPUT);
+pinMode(motor2Phase, OUTPUT);
+analogWrite(motor1PWM, 0);
+analogWrite(motor2PWM, 0);
+ }
+// the loop routine runs over and over again continuously:
+void loop() {
+  testSensors();
+  int error= 2*DigitalValue[0]+DigitalValue[1]-DigitalValue[3]-2*DigitalValue[4];
+  speedRight += turnSpeed*error;
+  speedLeft -= turnSpeed*error;
+  
+  speedRight = constrain(speedRight, -255, 255);
+  speedLeft  = constrain(speedLeft,  -255, 255);
+
+  driveCurve(speedRight,speedLeft);
+   
+}
+
+
+
+
+
+// motor driving code
+void rightFoward(int speed){
+  digitalWrite(motor1Phase, HIGH); //forward
+  analogWrite(motor1PWM, speed); // set speed of motor
+}
+void rightReverse(int speed){
+  digitalWrite(motor1Phase, LOW); //reverse
+  analogWrite(motor1PWM, speed); // set speed of motor
+}
+void leftFoward(int speed){
+  digitalWrite(motor2Phase, LOW); //forward
+  analogWrite(motor2PWM, speed); // set speed of motor
+}
+void leftReverse(int speed){
+  digitalWrite(motor2Phase, HIGH); //reverse
+  analogWrite(motor2PWM, speed); // set speed of motor
+}
+
+void driveCurve(int speedRight,int speedLeft){
+  if (speedRight>0){rightFoward(speedRight);}
+   else {rightReverse(abs(speedRight));}
+  if (speedLeft>0){leftFoward(speedLeft);}
+   else {leftReverse(abs(speedLeft));}
+  }
+
+void testSensors(){
+  int i;
+  for (i=0;i<5;i++){
+    AnalogValue[i]=analogRead(AnalogPin[i]);
+    if (AnalogValue[i]>1000){DigitalValue[i]=1;} //digital value= 1 == white line
+    else{DigitalValue[i]=0;}
+    Serial.print(DigitalValue[i]); // This prints the actual analog sensor reading
+    Serial.print("\t");
+    if(i==4){
+      Serial.println(""); //carriage return
+      }
+    }
+  }
