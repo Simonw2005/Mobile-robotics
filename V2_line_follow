@@ -1,0 +1,168 @@
+// figures to adjust
+int speed = 120;          // base forward speed (PWM-ish)
+int baseSpeed = 50;
+int maxPWM = 255;
+
+// PID gains (tune these)
+float Kp = 80.0;
+float Ki = 0.0;
+float Kd = 35.0;
+
+// motor pins
+int motor1PWM = 37;
+int motor1Phase = 38;
+int motor2PWM = 39;
+int motor2Phase = 20;
+
+// line follow
+int AnalogValue[5] = {0,0,0,0,0};
+int DigitalValue[5]= {0,0,0,0,0};
+int AnalogPin[5]   = {4,5,6,7,15}; // keep 8 free for tone O/P music
+
+int weights[5] = {-2,-1,0,1,2};
+
+int threshold = 500;      // tune to your sensors (0..1023)
+
+// PID state
+float integral = 0.0;
+float lastError = 0.0;
+
+unsigned long lastMs = 0;
+
+// ----- setup -----
+void setup() {
+  Serial.begin(9600);
+
+  pinMode(motor1PWM, OUTPUT);
+  pinMode(motor1Phase, OUTPUT);
+  pinMode(motor2PWM, OUTPUT);
+  pinMode(motor2Phase, OUTPUT);
+
+  analogWrite(motor1PWM, 0);
+  analogWrite(motor2PWM, 0);
+
+  lastMs = millis();
+}
+
+// ----- loop -----
+void loop() {
+  testSensors();
+
+  // compute dt (seconds)
+  unsigned long now = millis();
+  float dt = (now - lastMs) / 1000.0;
+  if (dt <= 0) dt = 0.001;   // safety
+  lastMs = now;
+
+  // error in [-1..1]
+  float error = getErrorNormalized();
+
+  // If line lost, you can either stop or keep turning toward last known direction.
+  // Here: if lost, keep the lastError direction to search.
+  if (isLineLost()) {
+    error = (lastError >= 0) ? 1.0 : -1.0;
+  }
+
+  // PID terms
+  float P = Kp * error;
+
+  integral += error * dt;
+  integral = constrain(integral, -1.0, 1.0);   // anti-windup (adjust if needed)
+  float I = Ki * integral;
+
+  float derivative = (error - lastError) / dt;
+  float D = Kd * derivative;
+
+  lastError = error;
+
+  // correction in PWM units
+  float speedGain = (float)speed / (float)baseSpeed;   // >1 when speed increased
+  float pidOutScaled = (P + I + D) * speedGain;
+
+  int correction = (int)pidOutScaled;
+
+
+
+
+int speedRight = speed + correction;
+int speedLeft  = speed - correction;
+
+// EXTRA: make inside wheel slow down more (tightens cornering)
+float insideBoost = 1.4; // try 1.2–2.0
+if (correction > 0) {          // turning right -> left is inside
+  speedLeft = speed - (int)(insideBoost * correction);
+} else {                        // turning left -> right is inside
+  speedRight = speed + (int)(insideBoost * correction); // correction negative
+}
+
+  speedRight = constrain(speedRight, -maxPWM, maxPWM);
+  speedLeft  = constrain(speedLeft,  -maxPWM, maxPWM);
+
+  driveCurve(speedRight, speedLeft);
+
+  // Debug (optional)
+  // Serial.print("e="); Serial.print(error, 3);
+  // Serial.print(" corr="); Serial.print(correction);
+  // Serial.print(" SR="); Serial.print(speedRight);
+  // Serial.print(" SL="); Serial.println(speedLeft);
+}
+
+// ----- motor driving code -----
+void rightFoward(int spd){
+  digitalWrite(motor1Phase, HIGH); // forward
+  analogWrite(motor1PWM, spd);
+}
+void rightReverse(int spd){
+  digitalWrite(motor1Phase, LOW);  // reverse
+  analogWrite(motor1PWM, spd);
+}
+void leftFoward(int spd){
+  digitalWrite(motor2Phase, LOW);  // forward
+  analogWrite(motor2PWM, spd);
+}
+void leftReverse(int spd){
+  digitalWrite(motor2Phase, HIGH); // reverse
+  analogWrite(motor2PWM, spd);
+}
+
+void driveCurve(int speedRight, int speedLeft){
+  if (speedRight >= 0) rightFoward(speedRight);
+  else rightReverse(abs(speedRight));
+
+  if (speedLeft >= 0) leftFoward(speedLeft);
+  else leftReverse(abs(speedLeft));
+}
+
+// ----- sensors -----
+void testSensors(){
+  for(int i=0; i<5; i++){
+    AnalogValue[i] = analogRead(AnalogPin[i]);
+
+    // Convert to 0/1 using threshold.
+    // Flip the comparison if your sensors read opposite (line vs background).
+    DigitalValue[i] = (AnalogValue[i] > threshold) ? 1 : 0;
+  }
+}
+
+// returns true if all sensors see "no line"
+bool isLineLost() {
+  int sum = 0;
+  for (int i = 0; i < 5; i++) sum += DigitalValue[i];
+  return (sum == 0);
+}
+
+// Weighted average -> normalized error in [-1..1]
+float getErrorNormalized() {
+  long weightedSum = 0;
+  long count = 0;
+
+  for (int i = 0; i < 5; i++) {
+    weightedSum += (long)weights[i] * DigitalValue[i];
+    count += DigitalValue[i];
+  }
+
+  if (count == 0) return 0.0;
+
+  float avg = (float)weightedSum / (float)count; // [-2..2]
+  return avg / 2.0;                               // [-1..1]
+}
